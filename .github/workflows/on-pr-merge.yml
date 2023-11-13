@@ -1,0 +1,66 @@
+name: On PR Merge - Build
+
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
+    paths:
+      - contract/*
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  on-pr-merge-build:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Tests
+        run: cargo check
+      - name: Build, Upload, and Upgrade
+        run: |
+
+          # trigger toolchain download
+          rustc -vV
+          rustup default nightly-2023-08-08
+
+          # get platform for precompiled
+          PLATFORM="$(echo $(echo $(uname) | tr '[:upper:]' '[:lower:]')/$(if [[ $(uname -m) = x86_64 ]]; then echo amd64; else echo arm64; fi))"
+          PRECOMPILED_CC="utilities/precompiled/${PLATFORM}/cargo-contract"
+
+          # build
+          ${PRECOMPILED_CC} contract build \
+          --manifest-path contract/Cargo.toml \
+          --release
+
+          # get code hash
+          CODE_HASH_JSON=$(${PRECOMPILED_CC} contract upload \
+          --manifest-path contract/Cargo.toml \
+          --output-json \
+          --suri ${{secrets.DAPP_OWNER}} \
+          --url wss://boot.nagara.network:443)
+
+          # actual upload
+          ${PRECOMPILED_CC} contract upload \
+          --manifest-path contract/Cargo.toml \
+          --suri ${{secrets.DAPP_OWNER}} \
+          --url wss://boot.nagara.network:443 \
+          --skip-confirm \
+          --execute
+
+          # code-hash-parse
+          CODE_HASH=$(echo ${CODE_HASH_JSON} | jq -r '.code_hash')
+
+          # code-hash-upgrade
+          ${PRECOMPILED_CC} contract call \
+          --manifest-path contract/Cargo.toml \
+          --suri ${{secrets.DAPP_OWNER}} \
+          --url wss://boot.nagara.network:443 \
+          --skip-confirm \
+          --execute \
+          --contract gr4By4jrrXW91XPdZhEMmT96vW3zgPyTzgTwtDhf1UXjeuoyC \
+          --message authority_redirect_code \
+          --args ${CODE_HASH}
