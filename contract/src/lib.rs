@@ -5,6 +5,18 @@ pub mod result;
 
 #[ink::contract]
 mod self_identify {
+    /// The purpose of this dApp is to demonstrate:
+    /// - CI/CD enabled smart contract deployment with nagara Network (upgradability)
+    /// - Execution RefTime & ProofSize probes/references
+    /// - Custom storage migrations (not-yet-implemented)
+    /// - Custom smart contract data type
+    ///
+    /// Current functionalities:
+    /// - Only authorities can upgrade the code on-chain and reset all data
+    /// - Only authorities can add/remove identity verifier
+    /// - Current identity (pseudonym) length must be between 4 to 32 chars (alphanumeric & underscore)
+    /// - No one can update one's identity except themself, although the verifier can update the verified status
+    /// - No one can unverify one identity except when they update it themself
     #[ink(storage)]
     pub struct SelfIdentify {
         authority: ink::primitives::AccountId,
@@ -69,6 +81,9 @@ mod self_identify {
             }
         }
 
+        /// Redirect this dApp to another code hash
+        ///
+        /// # User: Authority (original uploader)
         #[ink(message)]
         pub fn authority_redirect_code(
             &mut self,
@@ -88,6 +103,9 @@ mod self_identify {
             Ok(())
         }
 
+        /// Reset all data
+        ///
+        /// # User: Authority (original uploader)
         #[ink(message)]
         pub fn authority_reset_all(&mut self) -> crate::result::Result<()> {
             self.ensure_caller_is_authority()?;
@@ -100,6 +118,9 @@ mod self_identify {
             crate::result::Result::Ok(())
         }
 
+        /// Add or Remove verifier
+        ///
+        /// # User: Authority (original uploader)
         #[ink(message)]
         pub fn authority_verifier(
             &mut self,
@@ -133,6 +154,9 @@ mod self_identify {
             crate::result::Result::Ok(())
         }
 
+        /// Attest one's pseudonym
+        ///
+        /// # User: Any registered verifier
         #[ink(message)]
         pub fn verifier_pseudonym_verify(
             &mut self,
@@ -165,6 +189,9 @@ mod self_identify {
             crate::result::Result::Ok(())
         }
 
+        /// Add or Update pseudonym
+        ///
+        /// # User: Anyone (caller)
         #[ink(message)]
         pub fn any_add_or_update_pseudonym(
             &mut self,
@@ -201,6 +228,9 @@ mod self_identify {
             crate::result::Result::Ok(())
         }
 
+        /// Get one's pseudonym
+        ///
+        /// # User: Anyone
         #[ink(message)]
         pub fn any_get_pseudonym_of(
             &self,
@@ -211,6 +241,9 @@ mod self_identify {
                 .map(|x| core::ops::Deref::deref(&x).into())
         }
 
+        /// Get pseudonym
+        ///
+        /// # User: Anyone (caller)
         #[ink(message)]
         pub fn any_get_pseudonym(&self) -> core::option::Option<ink::prelude::string::String> {
             self.accounts
@@ -218,12 +251,18 @@ mod self_identify {
                 .map(|x| core::ops::Deref::deref(&x).into())
         }
 
-        #[inline(always)]
+        /// Get authority account
+        ///
+        /// # User: Anyone
+        #[ink(message)]
+        pub fn any_get_authority(&self) -> ink::primitives::AccountId {
+            self.authority
+        }
+
         fn caller(&self) -> ink::primitives::AccountId {
             self.env().caller()
         }
 
-        #[inline(always)]
         fn ensure_caller_is_authority(&self) -> crate::result::Result<()> {
             if self.caller() != self.authority {
                 return crate::result::Result::Err(crate::result::Error::InsufficientPermission);
@@ -232,7 +271,6 @@ mod self_identify {
             crate::result::Result::Ok(())
         }
 
-        #[inline(always)]
         fn ensure_caller_is_verifier(&self) -> crate::result::Result<()> {
             if self.verifiers.contains(self.caller()) {
                 return crate::result::Result::Err(crate::result::Error::VerifierNotExist);

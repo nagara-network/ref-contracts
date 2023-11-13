@@ -9,7 +9,6 @@ path = "src/lib.rs"
 
 [dependencies]
 ink = { version = "4.3.0", default-features = false }
-regex-automata = { version = "0.4.3", default-features = false, features = ["meta"] }
 scale = { package = "parity-scale-codec", version = "3", default-features = false, features = [
     "derive",
 ] }
@@ -21,6 +20,6 @@ ink_e2e = "4.3.0"
 
 [features]
 default = ["std"]
-std = ["ink/std", "regex-automata/std", "scale/std", "scale-info/std", "thiserror-no-std/std"]
+std = ["ink/std", "scale/std", "scale-info/std", "thiserror-no-std/std"]
 ink-as-dependency = []
 e2e-tests = []
