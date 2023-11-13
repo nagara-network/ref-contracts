@@ -26,14 +26,13 @@ impl Identifier {
             return crate::result::Result::Err(crate::result::Error::BadPseudonymLength);
         }
 
-        let regex = regex_automata::meta::Regex::new(r"/^\w+$/").expect("Bad regex");
-
-        if !regex.is_match(input) {
+        if !input.chars().all(|c| c.is_alphanumeric() || c == '_') {
             return crate::result::Result::Err(crate::result::Error::BadStringInput);
         }
 
         let mut inner = [0u8; Self::MAX_LEN];
-        inner.copy_from_slice(input.as_bytes());
+        let inner_ref_mut = &mut inner[0..input.len()];
+        inner_ref_mut.copy_from_slice(input.as_bytes());
 
         crate::result::Result::Ok(Self(inner))
     }
