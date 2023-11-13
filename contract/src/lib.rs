@@ -1,142 +1,244 @@
 #![cfg_attr(not(feature = "std"), no_std, no_main)]
 
+pub mod pseudonyms;
+pub mod result;
+
 #[ink::contract]
 mod self_identify {
-
-    /// Defines the storage of your contract.
-    /// Add new fields to the below struct in order
-    /// to add new static storage fields to your contract.
     #[ink(storage)]
     pub struct SelfIdentify {
-        /// Stores a single `bool` value on the storage.
-        value: bool,
+        authority: ink::primitives::AccountId,
+        verifiers: ink::storage::Mapping<ink::primitives::AccountId, ()>,
+        pseudonyms: ink::storage::Mapping<crate::pseudonyms::Identifier, crate::pseudonyms::Info>,
+        accounts: ink::storage::Mapping<ink::primitives::AccountId, crate::pseudonyms::Identifier>,
+    }
+
+    #[ink(event)]
+    pub struct IdentityVerified {
+        verifier: ink::primitives::AccountId,
+        pseudonym: ink::prelude::string::String,
+        account: ink::primitives::AccountId,
+        at: u32, // Blocknumber is always u32
+    }
+
+    #[ink(event)]
+    pub struct IdentityInserted {
+        account: ink::primitives::AccountId,
+        pseudonym: ink::prelude::string::String,
+        at: u32, // Blocknumber is always u32
+    }
+
+    #[ink(event)]
+    pub struct IdentityRemoved {
+        account: ink::primitives::AccountId,
+        pseudonym: ink::prelude::string::String,
+        at: u32, // Blocknumber is always u32
+    }
+
+    #[ink(event)]
+    pub struct VerifierUpdated {
+        who: ink::primitives::AccountId,
+        removed: bool,
+        at: u32, // Blocknumber is always u32
+    }
+
+    #[ink(event)]
+    pub struct StoragePurged {
+        at: u32, // Blocknumber is always u32
+    }
+
+    #[ink(event)]
+    pub struct ContractUpgraded {
+        new_code_hash: [u8; 32],
+        at: u32, // Blocknumber is always u32
     }
 
     impl SelfIdentify {
-        /// Constructor that initializes the `bool` value to the given `init_value`.
-        #[ink(constructor)]
-        pub fn new(init_value: bool) -> Self {
-            Self { value: init_value }
-        }
-
-        /// Constructor that initializes the `bool` value to `false`.
-        ///
-        /// Constructors can delegate to other constructors.
         #[ink(constructor)]
         pub fn default() -> Self {
-            Self::new(Default::default())
+            let authority = Self::env().caller();
+            let verifiers = Default::default();
+            let pseudonyms = Default::default();
+            let accounts = Default::default();
+
+            Self {
+                authority,
+                verifiers,
+                pseudonyms,
+                accounts,
+            }
         }
 
-        /// A message that can be called on instantiated contracts.
-        /// This one flips the value of the stored `bool` from `true`
-        /// to `false` and vice versa.
         #[ink(message)]
-        pub fn flip(&mut self) {
-            self.value = !self.value;
-        }
+        pub fn authority_redirect_code(
+            &mut self,
+            new_code_hash: [u8; 32],
+        ) -> crate::result::Result<()> {
+            self.ensure_caller_is_authority()?;
 
-        /// Simply returns the current value of our `bool`.
-        #[ink(message)]
-        pub fn get(&self) -> bool {
-            self.value
-        }
-    }
+            ink::env::set_code_hash(&new_code_hash).unwrap_or_else(|err| {
+                panic!("Failed to `set_code_hash` to {new_code_hash:?} due to {err:?}")
+            });
 
-    /// Unit tests in Rust are normally defined within such a `#[cfg(test)]`
-    /// module and test functions are marked with a `#[test]` attribute.
-    /// The below code is technically just normal Rust code.
-    #[cfg(test)]
-    mod tests {
-        /// Imports all the definitions from the outer scope so we can use them here.
-        use super::*;
-
-        /// We test if the default constructor does its job.
-        #[ink::test]
-        fn default_works() {
-            let self_identify = SelfIdentify::default();
-            assert_eq!(self_identify.get(), false);
-        }
-
-        /// We test a simple use case of our contract.
-        #[ink::test]
-        fn it_works() {
-            let mut self_identify = SelfIdentify::new(false);
-            assert_eq!(self_identify.get(), false);
-            self_identify.flip();
-            assert_eq!(self_identify.get(), true);
-        }
-    }
-
-
-    /// This is how you'd write end-to-end (E2E) or integration tests for ink! contracts.
-    ///
-    /// When running these you need to make sure that you:
-    /// - Compile the tests with the `e2e-tests` feature flag enabled (`--features e2e-tests`)
-    /// - Are running a Substrate node which contains `pallet-contracts` in the background
-    #[cfg(all(test, feature = "e2e-tests"))]
-    mod e2e_tests {
-        /// Imports all the definitions from the outer scope so we can use them here.
-        use super::*;
-
-        /// A helper function used for calling contract messages.
-        use ink_e2e::build_message;
-
-        /// The End-to-End test `Result` type.
-        type E2EResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
-
-        /// We test that we can upload and instantiate the contract using its default constructor.
-        #[ink_e2e::test]
-        async fn default_works(mut client: ink_e2e::Client<C, E>) -> E2EResult<()> {
-            // Given
-            let constructor = SelfIdentifyRef::default();
-
-            // When
-            let contract_account_id = client
-                .instantiate("self_identify", &ink_e2e::alice(), constructor, 0, None)
-                .await
-                .expect("instantiate failed")
-                .account_id;
-
-            // Then
-            let get = build_message::<SelfIdentifyRef>(contract_account_id.clone())
-                .call(|self_identify| self_identify.get());
-            let get_result = client.call_dry_run(&ink_e2e::alice(), &get, 0, None).await;
-            assert!(matches!(get_result.return_value(), false));
+            self.env().emit_event(ContractUpgraded {
+                new_code_hash,
+                at: self.env().block_number(),
+            });
 
             Ok(())
         }
 
-        /// We test that we can read and write a value from the on-chain contract contract.
-        #[ink_e2e::test]
-        async fn it_works(mut client: ink_e2e::Client<C, E>) -> E2EResult<()> {
-            // Given
-            let constructor = SelfIdentifyRef::new(false);
-            let contract_account_id = client
-                .instantiate("self_identify", &ink_e2e::bob(), constructor, 0, None)
-                .await
-                .expect("instantiate failed")
-                .account_id;
+        #[ink(message)]
+        pub fn authority_reset_all(&mut self) -> crate::result::Result<()> {
+            self.ensure_caller_is_authority()?;
+            self.verifiers = Default::default();
 
-            let get = build_message::<SelfIdentifyRef>(contract_account_id.clone())
-                .call(|self_identify| self_identify.get());
-            let get_result = client.call_dry_run(&ink_e2e::bob(), &get, 0, None).await;
-            assert!(matches!(get_result.return_value(), false));
+            self.env().emit_event(StoragePurged {
+                at: self.env().block_number(),
+            });
 
-            // When
-            let flip = build_message::<SelfIdentifyRef>(contract_account_id.clone())
-                .call(|self_identify| self_identify.flip());
-            let _flip_result = client
-                .call(&ink_e2e::bob(), flip, 0, None)
-                .await
-                .expect("flip failed");
+            crate::result::Result::Ok(())
+        }
 
-            // Then
-            let get = build_message::<SelfIdentifyRef>(contract_account_id.clone())
-                .call(|self_identify| self_identify.get());
-            let get_result = client.call_dry_run(&ink_e2e::bob(), &get, 0, None).await;
-            assert!(matches!(get_result.return_value(), true));
+        #[ink(message)]
+        pub fn authority_verifier(
+            &mut self,
+            verifier: ink::primitives::AccountId,
+            add: bool,
+        ) -> crate::result::Result<()> {
+            self.ensure_caller_is_authority()?;
 
-            Ok(())
+            let verifier_exist = self.verifiers.contains(verifier);
+
+            if add {
+                if verifier_exist {
+                    return crate::result::Result::Err(crate::result::Error::VerifierAlreadyExist);
+                }
+
+                self.verifiers.insert(verifier, &());
+            } else {
+                if !verifier_exist {
+                    return crate::result::Result::Err(crate::result::Error::VerifierNotExist);
+                }
+
+                self.verifiers.remove(verifier);
+            }
+
+            self.env().emit_event(VerifierUpdated {
+                who: verifier,
+                removed: !add,
+                at: self.env().block_number(),
+            });
+
+            crate::result::Result::Ok(())
+        }
+
+        #[ink(message)]
+        pub fn verifier_pseudonym_verify(
+            &mut self,
+            pseudonym: ink::prelude::string::String,
+        ) -> crate::result::Result<()> {
+            self.ensure_caller_is_verifier()?;
+            let pseudonym = crate::pseudonyms::Identifier::try_from_str(&pseudonym)?;
+            let mut info = self
+                .pseudonyms
+                .get(pseudonym)
+                .ok_or(crate::result::Error::PseudonymNotExist)?;
+
+            if info.verified_at.is_some() {
+                return crate::result::Result::Err(crate::result::Error::PseudonymAlreadyVerified);
+            }
+
+            self.pseudonyms.remove(pseudonym);
+            info.verified_at = Some(self.env().block_number());
+            info.verified_by = Some(self.caller());
+            self.pseudonyms.insert(pseudonym, &info);
+            let account = info.owner;
+
+            self.env().emit_event(IdentityVerified {
+                verifier: self.caller(),
+                pseudonym: core::ops::Deref::deref(&pseudonym).into(),
+                account,
+                at: self.env().block_number(),
+            });
+
+            crate::result::Result::Ok(())
+        }
+
+        #[ink(message)]
+        pub fn any_add_or_update_pseudonym(
+            &mut self,
+            pseudonym: ink::prelude::string::String,
+        ) -> crate::result::Result<()> {
+            let pseudonym = crate::pseudonyms::Identifier::try_from_str(&pseudonym)?;
+            let info = crate::pseudonyms::Info {
+                owner: self.caller(),
+                verified_by: None,
+                verified_at: None,
+            };
+
+            if self.accounts.contains(self.caller()) {
+                let old_pseudonym = self.accounts.get(self.caller()).unwrap();
+                self.accounts.remove(self.caller());
+                self.pseudonyms.remove(old_pseudonym);
+
+                self.env().emit_event(IdentityRemoved {
+                    account: self.caller(),
+                    pseudonym: core::ops::Deref::deref(&old_pseudonym).into(),
+                    at: self.env().block_number(),
+                })
+            }
+
+            self.accounts.insert(self.caller(), &pseudonym);
+            self.pseudonyms.insert(pseudonym, &info);
+
+            self.env().emit_event(IdentityInserted {
+                account: self.caller(),
+                pseudonym: core::ops::Deref::deref(&pseudonym).into(),
+                at: self.env().block_number(),
+            });
+
+            crate::result::Result::Ok(())
+        }
+
+        #[ink(message)]
+        pub fn any_get_pseudonym_of(
+            &self,
+            of: ink::primitives::AccountId,
+        ) -> core::option::Option<ink::prelude::string::String> {
+            self.accounts
+                .get(of)
+                .map(|x| core::ops::Deref::deref(&x).into())
+        }
+
+        #[ink(message)]
+        pub fn any_get_pseudonym(&self) -> core::option::Option<ink::prelude::string::String> {
+            self.accounts
+                .get(self.caller())
+                .map(|x| core::ops::Deref::deref(&x).into())
+        }
+
+        #[inline(always)]
+        fn caller(&self) -> ink::primitives::AccountId {
+            self.env().caller()
+        }
+
+        #[inline(always)]
+        fn ensure_caller_is_authority(&self) -> crate::result::Result<()> {
+            if self.caller() != self.authority {
+                return crate::result::Result::Err(crate::result::Error::InsufficientPermission);
+            }
+
+            crate::result::Result::Ok(())
+        }
+
+        #[inline(always)]
+        fn ensure_caller_is_verifier(&self) -> crate::result::Result<()> {
+            if self.verifiers.contains(self.caller()) {
+                return crate::result::Result::Err(crate::result::Error::VerifierNotExist);
+            }
+
+            crate::result::Result::Ok(())
         }
     }
 }
